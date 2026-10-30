@@ -70,6 +70,17 @@ class NewAPICheckin:
         """
         return '****'
 
+    @staticmethod
+    def _is_already_checked_in(message: str) -> bool:
+        """
+        判断响应消息是否表示今日已签到或重复签到（不区分大小写）
+        """
+        if not message:
+            return False
+        m = str(message).lower()
+        keywords = ['已签到', '已经签到', 'already', 'repeat', '重复签到', '已达上限']
+        return any(k in m for k in keywords)
+
     def __init__(self, base_url: str, session_cookie: str, user_id: str = None, cf_clearance: str = None,
                  login_username: str = None, login_password: str = None, access_token: str = None):
         self.base_url = base_url.rstrip('/')
@@ -345,9 +356,7 @@ class NewAPICheckin:
                     result['quota_awarded'] = checkin_data.get('quota_awarded')
                 else:
                     message = data.get('message', '签到失败')
-                    already_keywords = ['已签到', '已经签到', 'already', '重复签到']
-                    already_checked_in = any(k in message for k in already_keywords)
-                    if already_checked_in:
+                    if self._is_already_checked_in(message):
                         result['success'] = True
                         result['message'] = message
                     elif 'pow' in message.lower():
@@ -411,8 +420,7 @@ class NewAPICheckin:
                 timeout=30)
             data = resp.json()
             message = data.get('message', '签到失败')
-            already_keywords = ['已签到', '已经签到', 'already', '重复签到']
-            if data.get('success') or any(k in message for k in already_keywords):
+            if data.get('success') or self._is_already_checked_in(message):
                 result['success'] = True
                 result['message'] = f'{message} (PoW)'
                 cd = data.get('data', {})
@@ -453,8 +461,7 @@ class NewAPICheckin:
             return result
 
         message = resp_data.get('message', '签到失败')
-        already_keywords = ['已签到', '已经签到', 'already', '重复签到']
-        if resp_data.get('success') or any(k in message for k in already_keywords):
+        if resp_data.get('success') or self._is_already_checked_in(message):
             result['success'] = True
             result['message'] = f'{message} (Turnstile)'
             checkin_data = resp_data.get('data', {})
@@ -512,19 +519,20 @@ class NewAPICheckin:
             result['message'] = f'CF 绕过后签到失败: {browser_result["error"]}'
             return result
 
-        if browser_result.get('alreadyCheckedIn'):
+        msg = browser_result.get('message', '')
+        if browser_result.get('alreadyCheckedIn') or self._is_already_checked_in(msg):
             result['success'] = True
-            result['message'] = browser_result.get('message', '今日已签到 (CF绕过)')
+            result['message'] = msg or '今日已签到 (CF绕过)'
         elif browser_result.get('success'):
             result['success'] = True
-            result['message'] = browser_result.get('message', '签到成功 (CF绕过)')
+            result['message'] = msg or '签到成功 (CF绕过)'
             data = browser_result.get('data', {})
             if isinstance(data, dict):
                 checkin_data = data.get('data', data)
                 result['checkin_date'] = checkin_data.get('checkin_date')
                 result['quota_awarded'] = checkin_data.get('quota_awarded')
         else:
-            result['message'] = browser_result.get('message', 'CF 绕过后签到失败')
+            result['message'] = msg or 'CF 绕过后签到失败'
 
         return result
 
@@ -593,6 +601,9 @@ def parse_accounts(accounts_str: str) -> list:
                     # 如果提供了系统访问令牌，添加到账号信息中
                     if 'access_token' in item:
                         account['access_token'] = item['access_token']
+                    # 是否禁用/跳过该账号签到
+                    if item.get('disabled') is True or item.get('enabled') is False or item.get('enable_checkin') is False:
+                        account['disabled'] = True
                     accounts.append(account)
             return accounts
     except json.JSONDecodeError:
@@ -740,6 +751,9 @@ def load_env_file():
 def build_advice(message: str) -> str:
     """根据失败消息生成排查建议（随通知推送）"""
     m = message.lower()
+    if 'aliyun' in m or '阿里云' in m:
+        return ('站点受阿里云 WAF 防护拦截（数据中心 IP 被限制），'
+                '建议本地运行一次 python checkin.py（走住宅出口/代理）')
     if 'turnstile' in m:
         return ('该站开启 Turnstile 人机验证，已自动点击求解；若反复失败，'
                 '建议本地运行一次 python checkin.py')
@@ -820,6 +834,11 @@ def main():
 
         print(f'[{i}/{len(accounts)}] {name}')
         print(f'  站点: {NewAPICheckin._mask_url(url)}')
+
+        if account.get('disabled'):
+            print('  结果: ⏭️ 跳过 (已在配置中禁用)\n')
+            continue
+
         if user_id:
             print(f'  用户ID: {NewAPICheckin._mask_user_id(user_id)}')
 
