@@ -34,6 +34,8 @@ def detect_cloudflare_block(status_code: int, response_text: str) -> Tuple[bool,
     text_lower = response_text.lower()
     if 'aliyun_waf' in text_lower:
         return True, 'Aliyun WAF Challenge (阿里云 WAF 防火墙拦截)'
+    if 'var arg1=' in text_lower or 'jiasule' in text_lower:
+        return True, 'Jiasule Challenge (加速乐防爬挑战)'
 
     if status_code == 403:
         if 'just a moment' in text_lower:
