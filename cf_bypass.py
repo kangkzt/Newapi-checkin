@@ -21,28 +21,38 @@ from typing import Optional, Tuple
 
 def detect_cloudflare_block(status_code: int, response_text: str) -> Tuple[bool, str]:
     """
-    检测 Cloudflare 拦截
+    检测 Cloudflare / WAF 拦截
 
     借鉴 background.js:153-156 的检测逻辑:
     - 403 + "Just a moment" / <!DOCTYPE html>
     - 非 JSON 响应包含 <!DOCTYPE 标签
+    - 阿里云 WAF: 包含 aliyun_waf 特征
     """
+    if not response_text:
+        return False, ''
+
+    text_lower = response_text.lower()
+    if 'aliyun_waf' in text_lower:
+        return True, 'Aliyun WAF Challenge (阿里云 WAF 防火墙拦截)'
+
     if status_code == 403:
-        if 'Just a moment' in response_text or 'just a moment' in response_text.lower():
+        if 'just a moment' in text_lower:
             return True, 'Cloudflare JS Challenge (403 + Just a moment)'
-        if '<!DOCTYPE html' in response_text.lower() and 'cloudflare' in response_text.lower():
+        if '<!doctype html' in text_lower and 'cloudflare' in text_lower:
             return True, 'Cloudflare HTML Challenge (403 + Cloudflare page)'
 
     if status_code == 503:
-        if 'cloudflare' in response_text.lower() and ('challenge' in response_text.lower() or 'checking your browser' in response_text.lower()):
+        if 'cloudflare' in text_lower and ('challenge' in text_lower or 'checking your browser' in text_lower):
             return True, 'Cloudflare Challenge (503)'
 
     try:
         import json
         json.loads(response_text)
     except (json.JSONDecodeError, ValueError):
-        if '<!DOCTYPE' in response_text and ('Just a moment' in response_text or 'challenge-platform' in response_text or 'cf-challenge' in response_text):
+        if '<!doctype' in text_lower and ('just a moment' in text_lower or 'challenge-platform' in text_lower or 'cf-challenge' in text_lower):
             return True, 'Cloudflare Challenge (non-JSON HTML response)'
+        if 'aliyun_waf' in text_lower:
+            return True, 'Aliyun WAF Challenge (阿里云 WAF 防火墙拦截)'
 
     return False, ''
 
@@ -276,8 +286,9 @@ class CloudflareBypasser:
                         const success = data.success === true || data.status === 'success' || data.ret === 1 || data.code === 0;
                         const message = data.message || data.msg || data.data || '签到完成';
                         const msgStr = typeof message === 'string' ? message : JSON.stringify(message);
-                        const alreadyKeywords = ['已签到', '已经签到', 'already', '重复签到'];
-                        const alreadyCheckedIn = !success && alreadyKeywords.some(k => msgStr.includes(k));
+                        const alreadyKeywords = ['已签到', '已经签到', 'already', 'repeat', '重复签到', '已达上限'];
+                        const msgLower = msgStr.toLowerCase();
+                        const alreadyCheckedIn = !success && alreadyKeywords.some(k => msgLower.includes(k));
                         return {
                             success: success || alreadyCheckedIn,
                             alreadyCheckedIn,
