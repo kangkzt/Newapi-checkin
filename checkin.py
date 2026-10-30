@@ -3,6 +3,16 @@
 """
 NewAPI 自动签到脚本
 支持多账号签到，通过 GitHub Actions 定时执行
+
+新增已签到判定方法（L74-L83）：
+添加静态方法 NewAPICheckin._is_already_checked_in()，统一通过 .lower() 不区分大小写匹配，并扩充关键词：['已签到', '已经签到', 'already', 'repeat', '重复签到', '已达上限']。
+修复各签到通道判定（L357、L422、L464、L521）：
+将常规签到、PoW 签到、Turnstile 签到、CF 绕过签到 4 个流程中的判定逻辑全部替换为统一的 _is_already_checked_in。
+支持配置禁用/跳过字段（L604-L606、L839-L843）：
+在 parse_accounts 中支持解析 "disabled": true 或 "enable_checkin": false；
+在 main() 循环中自动跳过禁用站点并打印提示，避免空跑。
+增加阿里云 WAF 建议（L753-L755）：
+在 build_advice() 中增加对命中阿里云 WAF 站点的建议输出。
 """
 
 import os
